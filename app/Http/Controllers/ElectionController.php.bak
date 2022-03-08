@@ -1,0 +1,136 @@
+<?php
+
+namespace App\Http\Controllers;
+
+use App\Http\Resources\ElectionCollection;
+use App\Http\Resources\ElectionResource;
+use App\Models\Candidate;
+use App\Models\Election;
+use Composer\Util\Http\Response;
+use Illuminate\Contracts\Cache\Store;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Facades\Str;
+use Carbon\Carbon;
+
+class ElectionController extends Controller
+{
+    /**
+     * Display a listing of the resource.
+     *
+     * @return \Illuminate\Http\Response
+     */
+    public function index()
+    {
+        return Response(new ElectionCollection(Election::paginate(25)));
+    }
+
+    /**
+     * Show the form for creating a new resource.
+     *
+     * @return \Illuminate\Http\Response
+     */
+    public function create()
+    {
+        //
+    }
+
+    /**
+     * Store a newly created resource in storage.
+     *
+     * @param  \Illuminate\Http\Request  $request
+     * @return \Illuminate\Http\Response
+     */
+    public function store(Request $request)
+    {
+        $request->merge(['users'=>json_decode($request->users)]);
+        $fields = $request->validate([
+            'title' => 'required|string|min:4|max:255',
+            'image'=> 'required',
+            'start_date'=>'required|date',
+            'end_date'=>'required|date|after:start_date',
+            'users' => 'required|array|min:2',
+            'users.*' => 'exists:users,id'
+        ]);
+        $fields['image'] = Storage::putFile('public/image/election', $fields['image'], 'public');
+        $fields['manager_id'] = $request->user()->manager->id;
+		$fields['start_date'] = Carbon::createFromFormat('Y-m-d H:i:s', $fields['start_date']);
+		$fields['end_date'] = Carbon::createFromFormat('Y-m-d H:i:s', $fields['end_date']);
+        $election = Election::create($fields);
+        $candidates = array_map(function ($id) {
+            return ['user_id'=>$id];
+        }, $fields['users']);
+        $election = Election::find($election->id)->first();
+        $candidates = $election->candidates()->createMany($candidates);
+        return Response(new ElectionResource($election), 201);
+    }
+
+    /**
+     * Display the specified resource.
+     *
+     * @param  \App\Models\Election  $election
+     * @return \Illuminate\Http\Response
+     */
+    public function show(Election $election)
+    {
+        return Response(new ElectionResource($election));
+    }
+
+    /**
+     * Show the form for editing the specified resource.
+     *
+     * @param  \App\Models\Election  $election
+     * @return \Illuminate\Http\Response
+     */
+    public function edit(Election $election)
+    {
+        //
+    }
+
+    /**
+     * Update the specified resource in storage.
+     *
+     * @param  \Illuminate\Http\Request  $request
+     * @param  \App\Models\Election  $election
+     * @return \Illuminate\Http\Response
+     */
+    public function update(Request $request, Election $election)
+    {
+        $fields = $request->validate([
+            'title' => 'required|string|min:4|max:255',
+            'is_closed'=> 'required|boolean',
+        ]);
+        $election->update($fields);
+        return Response(1, 204);
+    }
+
+    /**
+     * Remove the specified resource from storage.
+     *
+     * @param  \App\Models\Election  $election
+     * @return \Illuminate\Http\Response
+     */
+    public function destroy(Election $election)
+    {
+        if($election->delete()){
+            return Response(1, 204);
+        }
+        return  Response('', 422);
+    }
+
+
+
+    public function search(Request $request){
+        // Get the search value from the request
+        $search = $request->input('search');
+    
+        // Search in the title from the elections table
+        $elections = Election::query()
+            ->where('title', 'LIKE', "%{$search}%")
+            ->paginate(12);
+    
+        // Return the search
+        
+        return Response(new ElectionCollection($elections));
+    }
+}
